@@ -75,8 +75,14 @@ fn run_server(matches: &clap::ArgMatches) {
     server_thread.join().unwrap();
 }
 
-fn run_client() {
-    let client = Client::new("localhost:7878");
+fn run_client(matches: &clap::ArgMatches) {
+    let addr = format!(
+        "{}:{}",
+        matches.value_of("bind").unwrap_or("localhost"),
+        PORT_NUMBER,
+    );
+
+    let client = Client::new(addr);
     client.send(&[123, 66, 6, 1, 1, 2, 3, 5, 8, 13]);
 
     let mut buf: [u8; PACKET_BYTES] = unsafe { std::mem::uninitialized() };
@@ -95,6 +101,12 @@ fn run_client() {
 fn main() {
     let matches = clap::App::new("nettest")
         .version("0.1.0")
+        .arg(
+            Arg::with_name("addr")
+                .long("addr")
+                .takes_value(true)
+                .help("address to connect to"),
+        )
         .subcommand(
             SubCommand::with_name("serve").about("runs a server").arg(
                 Arg::with_name("bind")
@@ -108,6 +120,6 @@ fn main() {
     if let Some(matches) = matches.subcommand_matches("serve") {
         run_server(matches);
     } else {
-        run_client();
+        run_client(&matches);
     }
 }
