@@ -25,14 +25,17 @@ struct Client {
 
 impl Client {
     fn new<A: ToSocketAddrs>(server_addr: A) -> Self {
-        let socket = UdpSocket::bind("localhost:0").unwrap();
+        let socket = UdpSocket::bind("127.0.0.1:0").unwrap();
         /*socket
         .set_read_timeout(Some(std::time::Duration::from_secs(1)))
         .unwrap();*/
 
+        let server_addr = server_addr.to_socket_addrs().unwrap().next().unwrap();
+        println!("Connecting to {}", server_addr);
+
         Self {
             socket,
-            server_addr: server_addr.to_socket_addrs().unwrap().next().unwrap(),
+            server_addr,
         }
     }
 
@@ -78,7 +81,7 @@ fn run_server(matches: &clap::ArgMatches) {
 fn run_client(matches: &clap::ArgMatches) {
     let addr = format!(
         "{}:{}",
-        matches.value_of("bind").unwrap_or("localhost"),
+        matches.value_of("addr").unwrap_or("localhost"),
         PORT_NUMBER,
     );
 
