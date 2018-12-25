@@ -1,4 +1,7 @@
+use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use clap::{self, Arg, SubCommand};
+
+use std::io::{Cursor, Read};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs, UdpSocket};
 use std::sync::mpsc::channel;
 use std::thread;
@@ -69,15 +72,29 @@ fn run_server(matches: &clap::ArgMatches) {
 
         match server_socket.recv_from(&mut buf) {
             Ok((byte_count, from)) => {
-                let _ = tx.send((byte_count, from));
+                let mut rdr = Cursor::new(&buf[..]);
+                if let Ok(val) = rdr.read_u32::<LittleEndian>() {
+                    let _ = tx.send((val, from));
+                }
             }
             Err(e) => println!("recv_from: encountered IO error: {}", e),
         }
     });
 
-    while let Ok((byte_count, from)) = rx.recv() {
-        println!("Received {} bytes from {}", byte_count, from);
-        let _ = server.socket.send_to(&[byte_count as u8], from);
+    while let Ok((packet_count, from)) = rx.recv() {
+        println!(
+            "Received request for {} packets from {}",
+            packet_count, from
+        );
+
+        let packet: [u8; PACKET_BYTES] = [0; PACKET_BYTES];
+        for _ in 0..packet_count {
+            let _ = server.socket.send_to(&packet, from);
+
+            /*let ten_millis = std::time::Duration::from_nanos(1);
+            let now = std::time::Instant::now();
+            thread::sleep(ten_millis);*/
+        }
     }
 
     server_thread.join().unwrap();
@@ -90,19 +107,30 @@ fn run_client(matches: &clap::ArgMatches) {
         PORT_NUMBER,
     );
 
+    let packet_count: u32 = matches
+        .value_of("packet-count")
+        .unwrap_or("1")
+        .parse()
+        .unwrap();
+
     let client = Client::new(addr);
-    client.send(&[123, 66, 6, 1, 1, 2, 3, 5, 8, 13]);
+
+    let mut wtr = vec![];
+    wtr.write_u32::<LittleEndian>(packet_count).unwrap();
+    client.send(&wtr);
 
     let mut buf: [u8; PACKET_BYTES] = unsafe { std::mem::uninitialized() };
 
-    match client.socket.recv_from(&mut buf) {
-        Ok((byte_count, _from)) => {
-            println!(
-                "Received {} bytes back from the server; [0]: {}",
-                byte_count, buf[0]
-            );
+    for i in 0..packet_count {
+        match client.socket.recv_from(&mut buf) {
+            Ok((byte_count, _from)) => {
+                println!(
+                    "{}: Received {} bytes back from the server; [0]: {}",
+                    i, byte_count, buf[0]
+                );
+            }
+            Err(e) => println!("recv_from: encountered IO error: {}", e),
         }
-        Err(e) => println!("recv_from: encountered IO error: {}", e),
     }
 }
 
@@ -114,6 +142,12 @@ fn main() {
                 .long("addr")
                 .takes_value(true)
                 .help("address to connect to"),
+        )
+        .arg(
+            Arg::with_name("packet-count")
+                .long("packet-count")
+                .takes_value(true)
+                .help("spam spam spam"),
         )
         .subcommand(
             SubCommand::with_name("serve").about("runs a server").arg(
