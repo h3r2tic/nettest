@@ -1,5 +1,5 @@
 use clap::{self, Arg, SubCommand};
-use std::net::{SocketAddr, ToSocketAddrs, UdpSocket};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs, UdpSocket};
 use std::sync::mpsc::channel;
 use std::thread;
 
@@ -25,12 +25,17 @@ struct Client {
 
 impl Client {
     fn new<A: ToSocketAddrs>(server_addr: A) -> Self {
-        let socket = UdpSocket::bind("127.0.0.1:0").unwrap();
-        /*socket
-        .set_read_timeout(Some(std::time::Duration::from_secs(1)))
-        .unwrap();*/
-
         let server_addr = server_addr.to_socket_addrs().unwrap().next().unwrap();
+
+        let bind_addr = if server_addr.is_ipv4() {
+            SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), 0)
+        } else {
+            SocketAddr::new(IpAddr::V6(Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 0)), 0)
+        };
+
+        let bind_addr = bind_addr.to_socket_addrs().unwrap().next().unwrap();
+        let socket = UdpSocket::bind(bind_addr).unwrap();
+
         println!("Connecting to {}", server_addr);
 
         Self {
