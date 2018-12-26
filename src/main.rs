@@ -1,7 +1,7 @@
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use clap::{self, Arg, SubCommand};
 
-use std::io::{Cursor, Read};
+use std::io::{self, Cursor, Read};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs, UdpSocket};
 use std::sync::mpsc::channel;
 use std::thread;
@@ -16,6 +16,7 @@ struct Server {
 impl Server {
     fn new(addr: &String) -> Self {
         let socket = UdpSocket::bind(addr).unwrap();
+        socket.set_nonblocking(true).unwrap();
 
         Self { socket }
     }
@@ -37,7 +38,9 @@ impl Client {
         };
 
         let bind_addr = bind_addr.to_socket_addrs().unwrap().next().unwrap();
+
         let socket = UdpSocket::bind(bind_addr).unwrap();
+        socket.set_nonblocking(true).unwrap();
 
         println!("Connecting to {}", server_addr);
 
@@ -71,11 +74,14 @@ fn run_server(matches: &clap::ArgMatches) {
         let mut buf: [u8; PACKET_BYTES] = unsafe { std::mem::uninitialized() };
 
         match server_socket.recv_from(&mut buf) {
-            Ok((byte_count, from)) => {
+            Ok((_byte_count, from)) => {
                 let mut rdr = Cursor::new(&buf[..]);
                 if let Ok(val) = rdr.read_u32::<LittleEndian>() {
                     let _ = tx.send((val, from));
                 }
+            }
+            Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
+                thread::sleep(std::time::Duration::from_nanos(1));
             }
             Err(e) => println!("recv_from: encountered IO error: {}", e),
         }
@@ -89,7 +95,16 @@ fn run_server(matches: &clap::ArgMatches) {
 
         let packet: [u8; PACKET_BYTES] = [0; PACKET_BYTES];
         for _ in 0..packet_count {
-            let _ = server.socket.send_to(&packet, from);
+            loop {
+                match server.socket.send_to(&packet, from) {
+                    Ok(_) => break,
+                    Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
+                        println!("Would block. Retrying!");
+                        thread::sleep(std::time::Duration::from_millis(1));
+                    }
+                    Err(e) => break println!("send_to: encountered IO error: {}", e),
+                }
+            }
 
             /*let ten_millis = std::time::Duration::from_nanos(1);
             let now = std::time::Instant::now();
@@ -122,14 +137,20 @@ fn run_client(matches: &clap::ArgMatches) {
     let mut buf: [u8; PACKET_BYTES] = unsafe { std::mem::uninitialized() };
 
     for i in 0..packet_count {
-        match client.socket.recv_from(&mut buf) {
-            Ok((byte_count, _from)) => {
-                println!(
-                    "{}: Received {} bytes back from the server; [0]: {}",
-                    i, byte_count, buf[0]
-                );
+        loop {
+            match client.socket.recv_from(&mut buf) {
+                Ok((byte_count, _from)) => {
+                    break println!(
+                        "{}: Received {} bytes back from the server; [0]: {}",
+                        i, byte_count, buf[0]
+                    );
+                }
+                /*Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
+                    thread::yield_now();
+                }*/
+                Err(_) => thread::yield_now(),
+                //Err(e) => break println!("recv_from: encountered IO error: {}", e),
             }
-            Err(e) => println!("recv_from: encountered IO error: {}", e),
         }
     }
 }
